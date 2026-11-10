@@ -1,0 +1,5 @@
+# Runtime (tested with these versions)
+semantic-kernel==1.47.0
+numpy>=1.26,<3
+# Optional: Anthropic backend for the Commander's executive summary
+# anthropic>=0.40

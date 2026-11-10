@@ -1,0 +1,52 @@
+[
+  {
+    "alert_id": "A01",
+    "ground_truth": {"severity": "Critical", "intel_source": "TR-001", "affected_assets": ["FS-01", "user:svc-backup"]},
+    "raw": {"source": "EDR-SentinelX", "id": "EDR-88121", "title": "Mass file encryption behaviour", "device_name": "FS-01", "user": "svc-backup", "process": "C:\\ProgramData\\vlt.exe", "sha256": "9f2c4e8a1b7d3f60c5e2a9b8d7f6e5c4b3a29180f7e6d5c4b3a2918070f6e5d4", "details": "Over 3,400 files encrypted and renamed with .cvault extension in 4 minutes; ransom note README_RESTORE.txt dropped; vssadmin delete shadows executed.", "vendor_severity": "high"}
+  },
+  {
+    "alert_id": "A02",
+    "ground_truth": {"severity": "High", "intel_source": "TR-002", "affected_assets": ["LT-0311", "user:asmith"]},
+    "raw": {"source": "MailGuard", "id": "MG-2231", "title": "User clicked credential phishing link", "recipient": "asmith@corp.example", "sender": "it-support@micros0ft-login.example", "url": "hxxp://micros0ft-login.example/owa", "src_host": "LT-0311", "details": "User asmith clicked the link and submitted credentials to a lookalike login page. Subject: 'Password expires today'.", "vendor_severity": "medium"}
+  },
+  {
+    "alert_id": "A03",
+    "ground_truth": {"severity": "Medium", "intel_source": "TR-003", "affected_assets": ["VPN-GW-01"]},
+    "raw": "Nov 10 02:14:33 VPN-GW-01 authd[812]: 1,284 failed login attempts across 311 distinct usernames from 45.155.205.99 within 10 minutes; 0 successful authentications; pattern consistent with password spraying"
+  },
+  {
+    "alert_id": "A04",
+    "ground_truth": {"severity": "Critical", "intel_source": "TR-004", "affected_assets": ["AWS-PROD", "user:svc-deploy"]},
+    "raw": {"source": "CloudTrail", "eventName": "RunInstances", "accessKeyId": "AKIAEXAMPLEPROD01", "account": "111122223333", "sourceIPAddress": "185.220.101.47", "region": "ap-southeast-3", "details": "RunInstances succeeded: 24 x p4d.24xlarge GPU instances launched in an unused region using an access key; key was found on a public GitHub repository.", "vendor_severity": "medium"}
+  },
+  {
+    "alert_id": "A05",
+    "ground_truth": {"severity": "Critical", "intel_source": "TR-005", "affected_assets": ["WEB-PROD-01"]},
+    "raw": {"source": "EDR-SentinelX", "id": "EDR-88177", "title": "Web shell detected", "device_name": "WEB-PROD-01", "file": "/var/www/html/uploads/img_cache.php", "src_ip": "91.240.118.172", "details": "PHP web shell executed commands (whoami, cat /etc/passwd) spawned by apache2 after exploitation of the file upload endpoint.", "vendor_severity": "high"}
+  },
+  {
+    "alert_id": "A06",
+    "ground_truth": {"severity": "Critical", "intel_source": "TR-006", "affected_assets": ["DB-PROD-01"]},
+    "raw": {"source": "DNS-Analytics", "title": "Suspected DNS tunneling", "client_ip": "10.0.2.15", "query_domain": "d4t4.exfil-cdn.example", "details": "38,000 TXT queries with high-entropy subdomains to d4t4.exfil-cdn.example in 1 hour (~2.1 GB encoded); consistent with data exfiltration over DNS.", "vendor_severity": "medium"}
+  },
+  {
+    "alert_id": "A07",
+    "ground_truth": {"severity": "High", "intel_source": "TR-007", "affected_assets": ["WS-1042"]},
+    "raw": {"source": "NDR-Flow", "title": "Periodic beaconing to rare external host", "src_ip": "10.0.10.42", "dest_ip": "193.42.33.14", "dest_domain": "cdn-update-check.example", "details": "HTTPS beacon every 60s with 10% jitter over 14 hours; JA3 fingerprint matches a known C2 framework profile.", "vendor_severity": "low"}
+  },
+  {
+    "alert_id": "A08",
+    "ground_truth": {"severity": "High", "intel_source": "TR-008", "affected_assets": ["LT-HR-07", "user:mlee"]},
+    "raw": {"source": "DLP-Endpoint", "title": "Bulk copy to removable media", "device_name": "LT-HR-07", "user": "mlee", "details": "4,812 files (employee salary and appraisal records) copied to an unregistered USB mass storage device two days after resignation notice.", "vendor_severity": "medium"}
+  },
+  {
+    "alert_id": "A09",
+    "ground_truth": {"severity": "Low", "intel_source": "TR-009", "affected_assets": ["KIOSK-03"]},
+    "raw": {"source": "AV-Console", "title": "Potentially unwanted program", "device_name": "KIOSK-03", "file": "C:\\Users\\Public\\BrowserBoost\\bboost.exe", "details": "Adware toolbar BrowserBoost detected injecting ads into browser sessions.", "vendor_severity": "medium"}
+  },
+  {
+    "alert_id": "A10",
+    "ground_truth": {"severity": "Low", "intel_source": "TR-010", "affected_assets": ["FW-EDGE-01"]},
+    "raw": "Nov 10 04:01:12 FW-EDGE-01 kernel: DROP SRC=103.145.13.77 DST=198.51.100.1 sequential TCP SYN to 1,000 ports in 30s; all connections blocked by policy; horizontal port scan"
+  }
+]

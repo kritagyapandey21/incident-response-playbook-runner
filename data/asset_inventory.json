@@ -1,0 +1,24 @@
+{
+  "hosts": [
+    {"asset_id": "FS-01", "hostname": "FS-01", "ips": ["10.0.5.10"], "type": "file server", "os": "Windows Server 2022", "criticality": "critical", "business_unit": "Finance", "data_classification": "confidential", "owner": "it-infra", "depends_on": [], "used_by": ["Finance shared drives", "Payroll"]},
+    {"asset_id": "WEB-PROD-01", "hostname": "WEB-PROD-01", "ips": ["10.0.1.20", "203.0.113.20"], "type": "public web server", "os": "Ubuntu 22.04", "criticality": "critical", "business_unit": "E-commerce", "data_classification": "internal", "owner": "web-team", "depends_on": ["DB-PROD-01"], "used_by": ["Customer storefront"]},
+    {"asset_id": "DB-PROD-01", "hostname": "DB-PROD-01", "ips": ["10.0.2.15"], "type": "database server", "os": "RHEL 9", "criticality": "critical", "business_unit": "E-commerce", "data_classification": "restricted (customer PII)", "owner": "dba-team", "depends_on": [], "used_by": ["WEB-PROD-01"]},
+    {"asset_id": "WS-1042", "hostname": "WS-1042", "ips": ["10.0.10.42"], "type": "workstation", "os": "Windows 11", "criticality": "medium", "business_unit": "Engineering", "data_classification": "internal", "owner": "jdoe", "depends_on": [], "used_by": []},
+    {"asset_id": "LT-0311", "hostname": "LT-0311", "ips": ["10.0.11.31"], "type": "laptop", "os": "Windows 11", "criticality": "medium", "business_unit": "Sales", "data_classification": "internal", "owner": "asmith", "depends_on": [], "used_by": []},
+    {"asset_id": "LT-HR-07", "hostname": "LT-HR-07", "ips": ["10.0.12.7"], "type": "laptop", "os": "macOS 15", "criticality": "medium", "business_unit": "Human Resources", "data_classification": "confidential", "owner": "mlee", "depends_on": [], "used_by": []},
+    {"asset_id": "KIOSK-03", "hostname": "KIOSK-03", "ips": ["10.0.30.3"], "type": "lobby kiosk", "os": "Windows 10", "criticality": "low", "business_unit": "Facilities", "data_classification": "public", "owner": "facilities", "depends_on": [], "used_by": []},
+    {"asset_id": "VPN-GW-01", "hostname": "VPN-GW-01", "ips": ["10.0.0.2", "198.51.100.2"], "type": "VPN gateway", "os": "Appliance", "criticality": "high", "business_unit": "IT", "data_classification": "internal", "owner": "netops", "depends_on": ["DC-01"], "used_by": ["Remote workforce"]},
+    {"asset_id": "FW-EDGE-01", "hostname": "FW-EDGE-01", "ips": ["10.0.0.1", "198.51.100.1"], "type": "perimeter firewall", "os": "Appliance", "criticality": "high", "business_unit": "IT", "data_classification": "internal", "owner": "netops", "depends_on": [], "used_by": ["All internet traffic"]},
+    {"asset_id": "DC-01", "hostname": "DC-01", "ips": ["10.0.3.5"], "type": "domain controller", "os": "Windows Server 2022", "criticality": "critical", "business_unit": "IT", "data_classification": "restricted", "owner": "it-infra", "depends_on": [], "used_by": ["VPN-GW-01", "All domain-joined hosts"]}
+  ],
+  "identities": [
+    {"asset_id": "user:jdoe", "username": "jdoe", "email": "jdoe@corp.example", "role": "Software Engineer", "privileged": false, "criticality": "medium", "devices": ["WS-1042"]},
+    {"asset_id": "user:asmith", "username": "asmith", "email": "asmith@corp.example", "role": "Account Executive", "privileged": false, "criticality": "medium", "devices": ["LT-0311"]},
+    {"asset_id": "user:mlee", "username": "mlee", "email": "mlee@corp.example", "role": "HR Business Partner", "privileged": false, "criticality": "medium", "devices": ["LT-HR-07"]},
+    {"asset_id": "user:svc-backup", "username": "svc-backup", "email": null, "role": "Backup service account", "privileged": true, "criticality": "high", "devices": ["FS-01"]},
+    {"asset_id": "user:svc-deploy", "username": "svc-deploy", "email": null, "role": "CI/CD deploy identity", "privileged": true, "criticality": "high", "devices": []}
+  ],
+  "cloud": [
+    {"asset_id": "AWS-PROD", "account_id": "111122223333", "name": "aws-production", "criticality": "critical", "data_classification": "restricted", "owner": "cloud-platform", "access_keys": [{"key_id": "AKIAEXAMPLEPROD01", "identity": "svc-deploy"}]}
+  ]
+}
