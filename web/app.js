@@ -378,7 +378,7 @@ function aiPanel(r) {
   if (!r.llm_model || !parts.length) return "";
   return `<div class="panel ai">
     <div class="panel-h"><h3><span class="spark" aria-hidden="true">✦</span> AI analysis</h3><span class="count">${esc(r.llm_model)} · advisory, validated by guardrails</span></div>
-    <div class="ai-grid">${parts.map(([h, body]) => `<div class="ai-item"><h4>${h}</h4><p>${body}</p></div>`).join("")}</div>
+    <div class="ai-grid">${parts.map(([h, body]) => `<div class="ai-item${h === "Executive summary" ? " wide" : ""}"><h4>${h}</h4><p>${body}</p></div>`).join("")}</div>
   </div>`;
 }
 

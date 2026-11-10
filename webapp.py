@@ -36,6 +36,7 @@ import json
 import logging
 import os
 import secrets
+import sys
 import threading
 import time
 import uuid
@@ -278,6 +279,11 @@ def main() -> None:
     ap.add_argument("--host", default=os.getenv("IRP_HOST", "127.0.0.1"))
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()
+    for stream in (sys.stdout, sys.stderr):   # LLM text can contain any Unicode
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     logging.basicConfig(level=os.getenv("IRP_LOG_LEVEL", "INFO"),
                         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
 

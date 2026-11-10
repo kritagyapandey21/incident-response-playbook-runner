@@ -108,6 +108,12 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
+    # LLM output can contain any Unicode (e.g. non-breaking hyphens); never crash while printing it.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     if sys.platform == "win32":
         import os
         os.system("")  # enable ANSI colours in Windows terminals

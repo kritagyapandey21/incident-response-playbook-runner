@@ -149,12 +149,20 @@ class LLMConfigTests(unittest.TestCase):
                 self.assertEqual(os.environ["IRP_TEST_B"], "from-env")
             os.environ.pop("IRP_TEST_A", None)
 
+    def test_groq_client_is_configured(self):
+        with mock.patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test", "GROQ_MODEL": "openai/gpt-oss-120b", "IRP_LLM": ""}):
+            llm = build_llm()
+        self.assertEqual((llm.provider, llm.model), ("Groq", "openai/gpt-oss-120b"))
+        self.assertIn("groq.com", str(llm.service.client.base_url))
+        self.assertEqual(llm.service.client.max_retries, 6)
+
     def test_llm_off_switch(self):
         with mock.patch.dict(os.environ, {"IRP_LLM": "off", "XAI_API_KEY": "x"}):
             self.assertIsNone(build_llm())
 
     def test_xai_client_is_configured_for_grok(self):
-        with mock.patch.dict(os.environ, {"XAI_API_KEY": "xai-test", "XAI_MODEL": "grok-test", "IRP_LLM": ""}):
+        with mock.patch.dict(os.environ, {"XAI_API_KEY": "xai-test", "XAI_MODEL": "grok-test", "IRP_LLM": "",
+                                          "GROQ_API_KEY": ""}):   # Groq has priority; blank it for this test
             llm = build_llm()
         self.assertEqual((llm.provider, llm.model), ("xAI Grok", "grok-test"))
         self.assertIn("x.ai", str(llm.service.client.base_url))

@@ -14,7 +14,7 @@ successful injection still cannot trigger an action.
 
 Providers (first configured wins). Keys are read from the environment or from a local,
 git-ignored `.env` file:
-  GROQ_API_KEY       [GROQ_MODEL, default llama-3.3-70b-versatile]  Groq (OpenAI-compatible API)
+  GROQ_API_KEY       [GROQ_MODEL, default openai/gpt-oss-120b]  Groq (OpenAI-compatible API)
   XAI_API_KEY        [XAI_MODEL, default grok-4]           xAI Grok (OpenAI-compatible API)
   AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY [AZURE_OPENAI_CHAT_DEPLOYMENT_NAME]
   OPENAI_API_KEY     [OPENAI_CHAT_MODEL_ID, default gpt-4o-mini]
@@ -156,14 +156,16 @@ def build_llm() -> LLMClient | None:
         if os.getenv("GROQ_API_KEY"):
             from openai import AsyncOpenAI
             from semantic_kernel.connectors.ai.open_ai import OpenAIChatCompletion
-            model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-            client = AsyncOpenAI(api_key=os.environ["GROQ_API_KEY"], base_url=GROQ_BASE_URL)
-            return LLMClient(OpenAIChatCompletion(ai_model_id=model, async_client=client, service_id="llm"), "Groq", model)
+            model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+            # Free-tier Groq rate-limits (HTTP 429): let the SDK back off and retry, honouring Retry-After.
+            client = AsyncOpenAI(api_key=os.environ["GROQ_API_KEY"], base_url=GROQ_BASE_URL, max_retries=6)
+            return LLMClient(OpenAIChatCompletion(ai_model_id=model, async_client=client, service_id="llm"),
+                             "Groq", model, timeout_s=120.0)
         if os.getenv("XAI_API_KEY"):
             from openai import AsyncOpenAI
             from semantic_kernel.connectors.ai.open_ai import OpenAIChatCompletion
             model = os.getenv("XAI_MODEL", "grok-4")
-            client = AsyncOpenAI(api_key=os.environ["XAI_API_KEY"], base_url=XAI_BASE_URL)
+            client = AsyncOpenAI(api_key=os.environ["XAI_API_KEY"], base_url=XAI_BASE_URL, max_retries=4)
             return LLMClient(OpenAIChatCompletion(ai_model_id=model, async_client=client, service_id="llm"), "xAI Grok", model)
         if os.getenv("AZURE_OPENAI_ENDPOINT") and os.getenv("AZURE_OPENAI_API_KEY"):
             from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion

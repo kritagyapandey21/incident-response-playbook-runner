@@ -20,7 +20,7 @@ python main.py --alert A01                        # one alert; you approve destr
 python main.py --all --approval deny              # every alert, simulated analyst rejects destructive steps
 python main.py --alert A07 --inject-plan-fault    # watch the Commander reject an unsafe plan
 python main.py --alert-file my_alert.json         # your own raw alert (JSON or a syslog line)
-python -m unittest discover -s tests -t .         # 50 unit, integration, LLM-guardrail and HTTP security tests
+python -m unittest discover -s tests -t .         # 51 unit, integration, LLM-guardrail and HTTP security tests
 ```
 
 ### Web console
@@ -174,6 +174,11 @@ All settings live in [irp/config.py](irp/config.py) and can be overridden with e
 | Containment steps citing the correct intel source | **42/42 (100%)** |
 | Affected-asset recall | 14/14 (100%) |
 | No destructive step without human approval | **PASS** |
+
+**With the LLM in the loop** (`python evaluate.py --llm`, Groq `openai/gpt-oss-120b`), the results were identical: 10/10, 42/42, 14/14, PASS.
+- **Calls:** 60 LLM calls, of which 2 hit the free-tier rate limit and fell back to the rules (calls now retry with back-off).
+- **Threat-intel picks:** retrieval and the LLM agreed on 8 of 10; the other 2 were the rate-limited calls.
+- **Attack-outcome reading:** the LLM agreed with the rules on 7 of 10. A06, A08 and A09 are genuinely ambiguous, so the LLM's reading is shown to the analyst as a warning rather than changing severity.
 
 The safety claim is tested four ways:
 

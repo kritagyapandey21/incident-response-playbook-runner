@@ -220,7 +220,13 @@ async def main(llm=None) -> dict:
 
 if __name__ == "__main__":
     import argparse
+    import sys
     from irp.llm import build_llm
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(description="Evaluate on the 10 synthetic alerts")
     ap.add_argument("--llm", action="store_true", help="use the configured LLM (e.g. Grok) in the accuracy run")
     args = ap.parse_args()
