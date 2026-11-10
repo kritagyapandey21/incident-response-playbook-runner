@@ -20,7 +20,7 @@ python main.py --alert A01                        # one alert; you approve destr
 python main.py --all --approval deny              # every alert, simulated analyst rejects destructive steps
 python main.py --alert A07 --inject-plan-fault    # watch the Commander reject an unsafe plan
 python main.py --alert-file my_alert.json         # your own raw alert (JSON or a syslog line)
-python -m unittest discover -s tests -t .         # 37 unit, integration and HTTP security tests
+python -m unittest discover -s tests -t .         # 50 unit, integration, LLM-guardrail and HTTP security tests
 ```
 
 ### Web console
@@ -40,7 +40,27 @@ The browser console runs the real pipeline. It needs no extra packages, since th
 
 Deep links: `/?alert=A05`, `/?incident=<id>` and `/?tab=eval`.
 
-No API key is needed. The pipeline is deterministic, so the evaluation gives the same result on every run. If `OPENAI_API_KEY`, Azure OpenAI or `ANTHROPIC_API_KEY` variables are set (see [irp/llm.py](irp/llm.py)), the Incident Commander also uses a Semantic Kernel `ChatCompletionAgent` to write an executive summary.
+### LLM reasoning with Grok
+
+The agents reason with an LLM (Semantic Kernel `ChatCompletionAgent`) when a key is configured. **xAI Grok** is the default provider; OpenAI, Azure OpenAI and Anthropic also work. Without a key, every agent falls back to its rule-based logic, so the project still runs end to end.
+
+```bash
+cp .env.example .env        # then put your key in .env:  XAI_API_KEY=xai-...
+python main.py --alert A05  # prints "Reasoning mode: LLM-assisted (xAI Grok · grok-4)"
+python evaluate.py --llm    # evaluate with Grok in the loop
+```
+
+The design rule is **the LLM proposes, deterministic guardrails decide**:
+
+| Agent | What the LLM does | Guardrail |
+|---|---|---|
+| Alert Parser | Extracts entities from unfamiliar alert formats, writes a summary, reads the attack outcome | Accepts an entity only if it appears verbatim in the alert; its outcome reading is advisory (disagreements become warnings) |
+| Threat Intel | Re-ranks the retrieved reports and writes a grounded intel brief (the "generation" half of RAG) | Can only choose a *retrieved* report; disagreeing with confident retrieval → flagged, not adopted |
+| Impact Assessor | Writes a business-impact narrative | Severity stays rule-based |
+| Containment Planner | Explains why each step fits this incident | Cannot add, remove or reorder actions; every step comes from a cited playbook |
+| Incident Commander | Second-opinion plan review and executive summary | Advisory only. It can never approve; the human-approval gate and the tool's safety guard are unchanged |
+
+Alert text is attacker-controlled, so prompts fence it as data and tell the model to ignore instructions inside it. The guardrails above mean that even a successful prompt injection cannot trigger an action; `tests/test_llm.py` checks this. Every LLM call is recorded on the timeline (`llm_call`, with purpose, model, latency and errors). A failed call falls back to the rule-based result.
 
 ## Architecture
 

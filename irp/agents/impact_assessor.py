@@ -9,10 +9,17 @@ Mapped: <=1 Low, 2 Medium, 3 High, >=4 Critical.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ..models import SEVERITY_LEVELS
-from .base import BaseAgent
+from .base import BaseAgent, clean_str
+
+IMPACT_INSTRUCTIONS = """You are the Impact Assessor agent in a security operations centre.
+Given an incident, its (already decided) severity and the affected assets from the asset inventory,
+explain the business impact. Do not change the severity. Return a JSON object:
+{"business_impact": "2 sentences on what the business stands to lose",
+ "key_risks": ["up to 4 short risk statements"]}"""
 
 CRIT_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
@@ -97,5 +104,19 @@ class ImpactAssessorAgent(BaseAgent):
                 f" {asset_mod:+d} asset criticality {signal_mod:+d} signal ({inc['status_signal']}) = {score}"
             ),
         }
+        out["impact_narrative"] = None
+        if self.llm is not None and affected:
+            res = await self.think("business_impact", IMPACT_INSTRUCTIONS, json.dumps({
+                "incident": inc.get("summary") or inc["title"],
+                "severity": severity,
+                "affected_assets": list(affected.values()),
+                "at_risk_assets": list(at_risk.values()),
+            }, default=str))
+            if res:
+                risks = res.get("key_risks") if isinstance(res.get("key_risks"), list) else []
+                out["impact_narrative"] = {
+                    "business_impact": clean_str(res.get("business_impact"), 500),
+                    "key_risks": [r for r in (clean_str(x, 160) for x in risks[:4]) if r],
+                }
         self.log("impact_assessed", out)
         return out

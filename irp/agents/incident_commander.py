@@ -21,21 +21,31 @@ import json
 import logging
 from typing import Any
 
-from ..llm import summarise
 from ..models import PHASE_ORDER
 from ..safety import HumanApprovalGate, is_destructive
-from .base import BaseAgent
+from .base import BaseAgent, clean_str
 
 log = logging.getLogger(__name__)
+
+REVIEW_INSTRUCTIONS = """You are the Incident Commander's second-opinion reviewer in a security operations centre.
+Review the containment plan below for this incident. You CANNOT approve or reject the plan and you
+cannot change it; your notes are shown to the human analyst. Point out real problems only
+(missing containment for an affected asset, risky ordering, a step that could destroy evidence,
+business-disruption risk). Return a JSON object:
+{"verdict": "ok" | "concerns", "concerns": ["up to 3 short, specific concerns"]}"""
+
+SUMMARY_INSTRUCTIONS = """You are an incident commander writing for a CISO. Using ONLY the facts in the
+incident report JSON, write a 4-6 sentence executive summary: what happened, severity and why,
+affected assets, what was executed, and what is waiting for human approval.
+Return a JSON object: {"summary": "..."}"""
 
 
 class IncidentCommanderAgent(BaseAgent):
     name = "IncidentCommanderAgent"
 
-    def __init__(self, kernel, timeline, gate: HumanApprovalGate, chat_service=None):
-        super().__init__(kernel, timeline)
+    def __init__(self, kernel, timeline, gate: HumanApprovalGate, llm=None):
+        super().__init__(kernel, timeline, llm)
         self.gate = gate
-        self.chat_service = chat_service
 
     # ------------------------------------------------------------------ review
     async def review(self, **_: Any) -> dict:
@@ -67,13 +77,34 @@ class IncidentCommanderAgent(BaseAgent):
         if intel["confidence"] == "low":
             warnings.append("threat-intel confidence is LOW: every non-preservation step requires analyst approval")
         elif intel["confidence"] == "medium":
-            warnings.append(f"threat-intel match is ambiguous; analyst should confirm {intel['primary']['doc_id']}")
+            warnings.append(f"threat-intel match is ambiguous ({intel.get('decided_by', 'retrieval')}); "
+                            f"analyst should confirm {intel['primary']['doc_id']}")
+        inc = self.timeline.latest("incident_record_created")
+        sig = inc.get("llm_signal")
+        if sig and not sig["agrees_with_rules"] and sig["evidence_verified"]:
+            warnings.append(f"LLM reads the outcome as '{sig['signal']}' (rules: '{inc['status_signal']}'): "
+                            f"\"{sig['evidence']}\"")
+
+        llm_review = None
+        if self.llm is not None and steps and not issues:   # only review plans that passed the hard checks
+            res = await self.think("plan_second_opinion", REVIEW_INSTRUCTIONS, json.dumps({
+                "incident": inc.get("summary") or inc["title"], "severity": impact["severity"],
+                "affected_assets": [a["asset_id"] for a in impact["affected_assets"]],
+                "threat_report": intel["primary"]["doc_id"] if intel["primary"] else None,
+                "plan": [{k: s[k] for k in ("step_id", "phase", "action", "target", "description")} for s in steps],
+            }))
+            if res:
+                concerns = res.get("concerns") if isinstance(res.get("concerns"), list) else []
+                llm_review = {"verdict": res.get("verdict") if res.get("verdict") in ("ok", "concerns") else None,
+                              "concerns": [c for c in (clean_str(x, 220) for x in concerns[:3]) if c]}
+                warnings += [f"Reviewer ({self.llm.model}): {c}" for c in llm_review["concerns"]]
 
         decision = {
-            "approved": not issues,
+            "approved": not issues,          # hard, deterministic checks only; the LLM cannot approve
             "revision_reviewed": draft["revision"],
             "issues": issues,
             "warnings": warnings,
+            "llm_review": llm_review,
             "destructive_steps": [s["step_id"] for s in steps if is_destructive(s["action"])],
         }
         self.log("plan_reviewed", decision)
@@ -184,11 +215,19 @@ class IncidentCommanderAgent(BaseAgent):
                 "order": s["order"], "step_id": s["step_id"], "phase": s["phase"], "action": s["action"],
                 "target": s["target"], "description": s["description"], "destructive": s["destructive"],
                 "intel_source": s["citation"]["doc_id"], "intel_section": s["citation"]["section"],
-                "approval_reason": s.get("approval_reason"),
+                "approval_reason": s.get("approval_reason"), "rationale": s.get("rationale"),
                 "status": s["status"], "approved_by": s.get("approved_by"), "result": s.get("result"),
             } for s in steps],
             "review_warnings": review["warnings"],
             "plan_revisions": self.timeline.count("containment_plan_drafted"),
+            "llm_model": self.llm.label if self.llm else None,
+            "incident_summary": inc.get("summary"),
+            "intel_brief": intel.get("intel_brief"),
+            "intel_decided_by": intel.get("decided_by", "retrieval"),
+            "impact_narrative": impact.get("impact_narrative"),
+            "executive_summary": None,
         }
-        report["executive_summary"] = await summarise(self.chat_service, json.dumps(report, default=str))
+        if self.llm is not None:
+            res = await self.think("executive_summary", SUMMARY_INSTRUCTIONS, json.dumps(report, default=str))
+            report["executive_summary"] = clean_str(res.get("summary"), 1200) if res else None
         return report

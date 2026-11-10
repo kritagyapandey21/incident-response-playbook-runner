@@ -17,7 +17,7 @@ import re
 import sys
 from pathlib import Path
 
-from irp.llm import build_chat_service
+from irp.llm import build_llm
 from irp.orchestrator import DATA, ROOT, PlaybookRunner
 from irp.safety import HumanApprovalGate
 
@@ -36,6 +36,11 @@ def print_report(report: dict | None, timeline) -> None:
     print("=" * 100)
     print(f" SEVERITY        : {SEV_COLOR.get(sev, '')}{sev}{RESET}   ({report['severity_rationale']})")
     print(f" INTEL SOURCE    : {report['intel_primary_source']} - {report['intel_title']}  [confidence {report['intel_confidence']}]")
+    print(f" DECIDED BY      : {report.get('intel_decided_by', 'retrieval')}")
+    if report.get("intel_brief"):
+        print(f" INTEL BRIEF     : {report['intel_brief']}")
+    if (report.get("impact_narrative") or {}).get("business_impact"):
+        print(f" BUSINESS IMPACT : {report['impact_narrative']['business_impact']}")
     print(" AFFECTED ASSETS : " + ", ".join(f"{a['asset_id']} ({a['criticality']})" for a in report["affected_assets"]))
     if report["at_risk_assets"]:
         print(" AT-RISK ASSETS  : " + ", ".join(f"{a['asset_id']} - {a['reason']}" for a in report["at_risk_assets"]))
@@ -49,6 +54,8 @@ def print_report(report: dict | None, timeline) -> None:
         src = f"{s['intel_source']} {s['intel_section'].replace('Recommended Containment', 'RC')}"
         target = s["target"] if len(s["target"]) <= 38 else "..." + s["target"][-35:]
         print(f" {s['order']:<3}{s['phase']:<10}{s['action']:<22}{target:<40}{src:<34}{s['status']}{flag}")
+        if s.get("rationale"):
+            print(f"    why: {s['rationale']}")
     for w in report["review_warnings"]:
         print(f"\n WARNING: {w}")
     if report.get("executive_summary"):
@@ -66,8 +73,11 @@ async def main() -> int:
     ap.add_argument("--inject-plan-fault", action="store_true",
                     help="make the planner's first draft unsafe to demonstrate Commander review")
     ap.add_argument("--json", action="store_true", help="print the raw JSON report")
+    ap.add_argument("--no-llm", action="store_true", help="force deterministic mode even if an LLM key is set")
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    llm = None if args.no_llm else build_llm()
+    print(f" Reasoning mode: {'LLM-assisted (' + llm.label + ')' if llm else 'deterministic (no LLM configured)'}")
 
     alerts = json.loads((DATA / "synthetic_alerts.json").read_text(encoding="utf-8"))
     if args.alert_file:
@@ -84,7 +94,7 @@ async def main() -> int:
 
     runner = PlaybookRunner(
         gate=HumanApprovalGate(mode=args.approval, approver="soc-analyst"),
-        chat_service=build_chat_service(),
+        llm=llm,
         out_dir=ROOT / "output",
         inject_plan_fault=args.inject_plan_fault,
     )

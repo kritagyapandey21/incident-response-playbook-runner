@@ -8,18 +8,24 @@ Every step carries a citation to the report section it came from.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ..models import PHASE_ORDER, Citation, ContainmentStep, severity_rank
 from ..safety import is_destructive
-from .base import BaseAgent
+from .base import BaseAgent, clean_str
+
+RATIONALE_INSTRUCTIONS = """You are the Containment Planner agent in a security operations centre.
+The containment steps below were taken from a cited threat-report playbook and are FIXED:
+you cannot add, remove or reorder them. For each step, write one short sentence explaining
+why it matters for THIS incident. Return a JSON object: {"rationales": {"S1": "...", "S2": "..."}}"""
 
 
 class ContainmentPlannerAgent(BaseAgent):
     name = "ContainmentPlannerAgent"
 
-    def __init__(self, kernel, timeline, inject_fault: bool = False):
-        super().__init__(kernel, timeline)
+    def __init__(self, kernel, timeline, inject_fault: bool = False, llm=None):
+        super().__init__(kernel, timeline, llm)
         # Fault injection for demos/tests: on the first draft, mislabel destructive steps
         # as non-destructive and put eradication first, so the Commander's review (and the
         # safety guard behind it) can be shown catching a bad plan.
@@ -91,6 +97,18 @@ class ContainmentPlannerAgent(BaseAgent):
                 unique.append(s)
         for i, s in enumerate(unique, 1):
             s.order, s.step_id = i, f"S{i}"
+
+        if self.llm is not None and unique and not (self.inject_fault and first_draft and not feedback):
+            res = await self.think("step_rationale", RATIONALE_INSTRUCTIONS, json.dumps({
+                "incident": inc.get("summary") or inc["title"],
+                "severity": severity,
+                "threat_report": f"{primary['doc_id']}: {primary['title']}",
+                "steps": [{"step_id": s.step_id, "phase": s.phase, "action": s.action,
+                           "target": s.target, "description": s.description} for s in unique],
+            }))
+            rationales = res.get("rationales") if res and isinstance(res.get("rationales"), dict) else {}
+            for s in unique:   # explanations only; the LLM cannot add, drop or reorder actions
+                s.rationale = clean_str(rationales.get(s.step_id), 280)
 
         plan = [s.to_dict() for s in unique]
         self.log("containment_plan_drafted", {

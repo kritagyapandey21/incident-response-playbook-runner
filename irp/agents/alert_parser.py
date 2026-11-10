@@ -16,8 +16,9 @@ import json
 import re
 from typing import Any
 
+from ..llm import fence
 from ..models import IncidentRecord
-from .base import BaseAgent
+from .base import BaseAgent, clean_str
 
 HOST_FIELDS = ["device_name", "src_host", "hostname", "host", "dest_host", "computer"]
 USER_FIELDS = ["user", "username", "recipient", "account_name"]
@@ -90,14 +91,91 @@ def is_internal_ip(ip: str) -> bool:
     return any(addr in net for net in PRIVATE_NETS)
 
 
+LLM_INSTRUCTIONS = """You are the Alert Parser agent in a security operations centre.
+Read one raw security alert and extract its indicators. Return a JSON object with exactly these keys:
+{"summary": "one plain sentence describing what happened",
+ "hosts": [], "users": [], "ips": [], "domains": [], "hashes": [], "files": [], "email_senders": [],
+ "signal": "confirmed | blocked | unknown",
+ "signal_evidence": "the exact words from the alert that justify the signal"}
+Rules: only list values that appear literally in the alert. "confirmed" means the attack
+succeeded, "blocked" means it was stopped or failed, "unknown" means the alert does not say."""
+
+LIST_FIELDS = ("hosts", "users", "ips", "domains", "hashes", "files", "email_senders")
+
+
 class AlertParserAgent(BaseAgent):
     name = "AlertParserAgent"
 
     async def run(self, **_: Any) -> IncidentRecord:
         raw = self.timeline.latest("alert_received")["raw"]
         record = self.parse(raw)
+        if self.llm is not None:
+            raw_text = json.dumps(raw) if isinstance(raw, dict) else str(raw)
+            out = await self.think("entity_extraction", LLM_INSTRUCTIONS, fence(raw_text))
+            if out:
+                self.merge_llm(record, out, raw_text)
         self.log("incident_record_created", record.to_dict())
         return record
+
+    def merge_llm(self, record: IncidentRecord, out: dict, raw_text: str) -> None:
+        """Add LLM-found entities only if they are verifiable in the raw alert text."""
+        haystack = raw_text.lower().replace("\\\\", "\\")
+        added: dict[str, list[str]] = {}
+        rejected: list[str] = []
+
+        def verbatim(v: str) -> bool:
+            return len(v) >= 2 and v.lower() in haystack
+
+        for fieldname in LIST_FIELDS:
+            values = out.get(fieldname)
+            if not isinstance(values, list):
+                continue
+            for v in values[:20]:
+                if not isinstance(v, str) or not v.strip():
+                    continue
+                v = v.strip()
+                if not verbatim(v):
+                    rejected.append(f"{fieldname}:{v[:60]}")
+                    continue
+                norm = None
+                if fieldname == "ips":
+                    try:
+                        ipaddress.ip_address(v)
+                        norm = v
+                    except ValueError:
+                        rejected.append(f"ips:{v[:60]}")
+                        continue
+                elif fieldname == "domains":
+                    found = extract_domains(v)
+                    norm = found[0] if found and found[0] not in INTERNAL_DOMAINS else None
+                elif fieldname == "hashes":
+                    norm = v.lower() if RE_SHA256.fullmatch(v) else None
+                elif fieldname == "hosts":
+                    norm = v.upper() if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9\-_.]{1,62}", v) else None
+                elif fieldname == "users":
+                    norm = v.split("@")[0].lower() if re.fullmatch(r"[\w.\-@]{2,64}", v) else None
+                elif fieldname == "files":
+                    norm = v if ("\\" in v or "/" in v) else None
+                elif fieldname == "email_senders":
+                    norm = v.lower() if "@" in v else None
+                current = getattr(record, fieldname)
+                if norm and norm not in current:
+                    current.append(norm)
+                    added.setdefault(fieldname, []).append(norm)
+                    if fieldname == "ips":
+                        (record.internal_ips if is_internal_ip(norm) else record.external_ips).append(norm)
+
+        record.summary = clean_str(out.get("summary"), 300)
+        signal = out.get("signal") if out.get("signal") in ("confirmed", "blocked", "unknown") else None
+        evidence = clean_str(out.get("signal_evidence"), 300)
+        if signal:
+            record.llm_signal = {
+                "signal": signal,
+                "evidence": evidence,
+                "evidence_verified": bool(evidence) and evidence.lower() in haystack,
+                "agrees_with_rules": signal == record.status_signal,
+            }
+        record.llm_added = {"added": added, "rejected_unverifiable": rejected[:20]}
 
     def parse(self, raw: Any) -> IncidentRecord:
         if isinstance(raw, str):

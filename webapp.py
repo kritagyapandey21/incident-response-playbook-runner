@@ -44,6 +44,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from irp.config import SETTINGS
+from irp.llm import build_llm
 from irp.orchestrator import DATA, ROOT, PlaybookRunner
 from irp.safety import HumanApprovalGate, validate_approver
 from irp.timeline import new_incident_id, validate_incident_id
@@ -67,10 +68,12 @@ class HttpError(Exception):
 class ConsoleApp:
     """Application logic, independent of the HTTP layer (and unit-testable)."""
 
-    def __init__(self, out_dir: Path, token: str):
+    def __init__(self, out_dir: Path, token: str, llm=None):
         self.token = token
         self.alerts = json.loads((DATA / "synthetic_alerts.json").read_text(encoding="utf-8"))
-        self.runner = PlaybookRunner(gate=HumanApprovalGate(mode="defer", approver="web-console"), out_dir=out_dir)
+        self.llm = llm
+        self.runner = PlaybookRunner(gate=HumanApprovalGate(mode="defer", approver="web-console"),
+                                     out_dir=out_dir, llm=llm)
         self.lock = threading.Lock()   # the pipeline is cheap; serialise for simplicity
 
     @staticmethod
@@ -148,7 +151,7 @@ class ConsoleApp:
         if rerun:
             import evaluate
             with self.lock:
-                asyncio.run(evaluate.main())
+                asyncio.run(evaluate.main(self.llm))
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
@@ -241,6 +244,9 @@ def make_handler(app: ConsoleApp, port: int):
             self._guard(needs_token=True)
             if path == "/api/alerts":
                 return self._send(200, [app.alert_summary(a) for a in app.alerts])
+            if path == "/api/config":
+                return self._send(200, {"llm": {"provider": app.llm.provider, "model": app.llm.model,
+                                                "label": app.llm.label} if app.llm else None})
             if path == "/api/incidents":
                 return self._send(200, app.runner.list_incidents())
             if path.startswith("/api/incidents/"):
@@ -278,7 +284,9 @@ def main() -> None:
     if not ipaddress.ip_address(args.host if args.host != "localhost" else "127.0.0.1").is_loopback:
         log.warning("binding to non-loopback address %s: the console will be reachable from the network", args.host)
     token = os.getenv("IRP_CONSOLE_TOKEN") or secrets.token_urlsafe(24)
-    app = ConsoleApp(SETTINGS.output_dir / "web", token)
+    llm = None if os.getenv("IRP_LLM", "").lower() in ("off", "0", "false") else build_llm()
+    log.info("reasoning mode: %s", f"LLM-assisted ({llm.label})" if llm else "deterministic (no LLM configured)")
+    app = ConsoleApp(SETTINGS.output_dir / "web", token, llm)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app, args.port))
     url = f"http://localhost:{args.port}/#token={token}"
     print(f"\nIncident Response console: {url}\n(open this exact link; Ctrl+C to stop)\n", flush=True)

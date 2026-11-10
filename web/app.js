@@ -316,6 +316,8 @@ function render() {
       </div>
     </div>
 
+    ${aiPanel(report)}
+
     <div class="panel">
       <div class="panel-h"><h3>Agent pipeline</h3><span class="count">planner → executor</span></div>
       <div class="pipe" id="pipe">${pipeline(timeline, report)}</div>
@@ -364,6 +366,22 @@ function render() {
   }
 }
 
+function aiPanel(r) {
+  const impact = r.impact_narrative || {};
+  const parts = [
+    r.incident_summary && ["What happened", esc(r.incident_summary)],
+    r.intel_brief && ["Threat intel brief", `${esc(r.intel_brief)} <span class="decided">${esc(r.intel_decided_by)}</span>`],
+    impact.business_impact && ["Business impact", esc(impact.business_impact) +
+      (impact.key_risks?.length ? `<ul class="risks">${impact.key_risks.map((k) => `<li>${esc(k)}</li>`).join("")}</ul>` : "")],
+    r.executive_summary && ["Executive summary", esc(r.executive_summary)],
+  ].filter(Boolean);
+  if (!r.llm_model || !parts.length) return "";
+  return `<div class="panel ai">
+    <div class="panel-h"><h3><span class="spark" aria-hidden="true">✦</span> AI analysis</h3><span class="count">${esc(r.llm_model)} · advisory, validated by guardrails</span></div>
+    <div class="ai-grid">${parts.map(([h, body]) => `<div class="ai-item"><h4>${h}</h4><p>${body}</p></div>`).join("")}</div>
+  </div>`;
+}
+
 function assetCard(a) {
   return `<div class="asset"><span class="id">${esc(a.asset_id)}</span><span class="crit c-${critClass(a.criticality)}">${esc(a.criticality)}</span>
     <span class="d">${esc(a.description || "")} · ${esc(a.reason)}</span></div>`;
@@ -380,7 +398,7 @@ function planRow(s) {
   return `<tr data-row="${esc(s.step_id)}" class="${s.destructive ? "destr" : ""}">
     <td class="ord">${esc(s.order)}</td>
     <td><span class="phase">${esc(s.phase)}</span></td>
-    <td><div class="act">${esc(s.action)}${s.destructive ? `<span class="tag-d">DESTRUCTIVE</span>` : ""}</div><div class="desc">${esc(s.description)}</div></td>
+    <td><div class="act">${esc(s.action)}${s.destructive ? `<span class="tag-d">DESTRUCTIVE</span>` : ""}</div><div class="desc">${esc(s.description)}</div>${s.rationale ? `<div class="why"><span class="spark" aria-hidden="true">✦</span> ${esc(s.rationale)}</div>` : ""}</td>
     <td class="tgt" title="${esc(s.target)}">${esc(shortTarget)}</td>
     <td><button class="cite" data-cite="${esc(s.intel_source)}" data-num="${esc(num)}" title="${esc(s.intel_section)}">${esc(s.intel_source)} · RC #${esc(num)}</button></td>
     <td><span class="status st-${esc(s.status)}">${esc(label)}</span>${gated}
@@ -441,6 +459,9 @@ function summarise(e) {
     case "step_rejected": return `step ${c(d.step_id)} rejected by ${esc(d.approver)}`;
     case "step_blocked": return `<b class="bad">BLOCKED</b> ${c(d.step_id)}: ${esc(d.result)}`;
     case "step_failed": return `<b class="bad">FAILED</b> ${c(d.step_id)}: ${esc(d.error)}`;
+    case "llm_call": return d.ok
+      ? `<span class="spark" aria-hidden="true">✦</span> ${esc(d.model)} · ${c(d.purpose)} (${esc(d.latency_ms)} ms)`
+      : `<span class="spark" aria-hidden="true">✦</span> <b class="bad">LLM ${esc(d.purpose)} failed</b>, rules used instead: ${esc(d.error)}`;
     case "incident_report": return "incident report written";
     case "escalated_to_human": return `<b class="bad">escalated</b>: ${esc(d.reason)}`;
     default: return esc(e.event);
@@ -639,11 +660,28 @@ function renderEval(r) {
     <p class="note">The alerts, threat reports and severity rubric were written together, so these scores show the system works on this set, not that it generalises. With the IOC boost turned off, retrieval still ranks the correct report first for all 10 alerts.</p>`;
 }
 
+/* ================================================================ LLM status */
+async function loadConfig() {
+  try {
+    const cfg = await api("/api/config");
+    state.llm = cfg.llm;
+    const b = $("#llm-badge");
+    b.hidden = false;
+    b.classList.toggle("off", !cfg.llm);
+    b.innerHTML = cfg.llm
+      ? `<span class="spark" aria-hidden="true">✦</span>${esc(cfg.llm.label)}`
+      : `<span class="spark" aria-hidden="true">✦</span>Deterministic mode`;
+    b.title = cfg.llm ? "Agents reason with this LLM; guardrails validate every output" : "No LLM key configured: agents use rules only";
+    if (cfg.llm) STAGES[2][1] = `Retrieving reports, ${cfg.llm.model} re-ranking`;
+  } catch (e) { /* non-fatal */ }
+}
+
 /* ================================================================ boot */
 async function boot() {
   renderAnalyst();
   if (!token()) return showLocked();
   try {
+    loadConfig();
     await loadAlerts();
     loadHistory();
     const q = new URLSearchParams(location.search);   // deep links: ?alert=A05, ?incident=<id>, ?tab=eval

@@ -135,10 +135,10 @@ class PlanExecutor:
 class PlaybookRunner:
     """Builds the kernel, tools and agents once, and runs alerts through them."""
 
-    def __init__(self, gate: HumanApprovalGate | None = None, chat_service=None,
-                 out_dir: Path | None = None, inject_plan_fault: bool = False):
+    def __init__(self, gate: HumanApprovalGate | None = None, llm=None,
+                 out_dir: Path | None = None, inject_plan_fault: bool = False, chat_service=None):
         self.gate = gate or HumanApprovalGate(mode="deny")
-        self.chat_service = chat_service
+        self.llm = llm or chat_service      # irp.llm.LLMClient or None (deterministic mode)
         self.out_dir = out_dir
         self.inject_plan_fault = inject_plan_fault
         self.index = ThreatReportIndex(DATA / "threat_reports")
@@ -150,12 +150,15 @@ class PlaybookRunner:
         self.kernel.add_plugin(AssetInventoryPlugin(DATA / "asset_inventory.json"), plugin_name="assets")
         self.kernel.add_plugin(ThreatIntelPlugin(self.index), plugin_name="threat_intel")
         self.kernel.add_plugin(self.response_tool, plugin_name="response")
-        if chat_service is not None:
-            self.kernel.add_service(chat_service)
+        if self.llm is not None and getattr(self.llm, "service", None) is not None:
+            try:
+                self.kernel.add_service(self.llm.service)   # the agents' chat-completion service
+            except Exception as exc:   # service already registered / non-SK test double
+                log.debug("kernel.add_service skipped: %s", exc)
 
     # ---------------------------------------------------------------- sessions
     def _commander(self, timeline: IncidentTimeline) -> IncidentCommanderAgent:
-        return IncidentCommanderAgent(self.kernel, timeline, self.gate, self.chat_service)
+        return IncidentCommanderAgent(self.kernel, timeline, self.gate, self.llm)
 
     def _remember(self, incident_id: str, session: dict) -> None:
         with self._sessions_lock:
@@ -212,10 +215,10 @@ class PlaybookRunner:
 
         commander = self._commander(timeline)
         agents = {
-            "AlertParserAgent": AlertParserAgent(self.kernel, timeline),
-            "ThreatIntelRetrievalAgent": ThreatIntelRetrievalAgent(self.kernel, timeline),
-            "ImpactAssessorAgent": ImpactAssessorAgent(self.kernel, timeline),
-            "ContainmentPlannerAgent": ContainmentPlannerAgent(self.kernel, timeline, self.inject_plan_fault),
+            "AlertParserAgent": AlertParserAgent(self.kernel, timeline, self.llm),
+            "ThreatIntelRetrievalAgent": ThreatIntelRetrievalAgent(self.kernel, timeline, self.llm),
+            "ImpactAssessorAgent": ImpactAssessorAgent(self.kernel, timeline, self.llm),
+            "ContainmentPlannerAgent": ContainmentPlannerAgent(self.kernel, timeline, self.inject_plan_fault, self.llm),
             "IncidentCommanderAgent": commander,
         }
         report = await PlanExecutor(WorkflowPlanner(timeline), agents, timeline).run()

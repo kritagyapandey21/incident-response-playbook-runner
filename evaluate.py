@@ -46,18 +46,33 @@ def approval_precedes_execution(timeline) -> tuple[int, int, list[str]]:
     return destructive_exec, ok, violations
 
 
-async def main() -> None:
+async def main(llm=None) -> dict:
+    """Run the evaluation. Pass an irp.llm.LLMClient to evaluate LLM-assisted mode (Pass A)."""
     alerts = json.loads((DATA / "synthetic_alerts.json").read_text(encoding="utf-8"))
     rows, total_steps, correct_steps = [], 0, 0
     sev_ok = vendor_ok = 0
     asset_hits = asset_total = 0
 
     # ---------------- Pass A: default-deny analyst (main accuracy run)
-    deny_runner = PlaybookRunner(gate=HumanApprovalGate(mode="deny"), out_dir=OUT)
+    deny_runner = PlaybookRunner(gate=HumanApprovalGate(mode="deny"), out_dir=OUT, llm=llm)
     deny_destructive_proposed = deny_destructive_executed = 0
+    llm_stats = {"calls": 0, "failed": 0, "decided_by": {}, "entities_added": 0, "entities_rejected": 0,
+                 "signal_agreement": 0, "signal_total": 0}
     for a in alerts:
         gt = a["ground_truth"]
         report, tl = await deny_runner.run_alert(a["alert_id"], a["raw"], overwrite=True)
+        if llm is not None:
+            calls = tl.read(event="llm_call")
+            llm_stats["calls"] += len(calls)
+            llm_stats["failed"] += sum(1 for c in calls if not c["data"]["ok"])
+            d = report.get("intel_decided_by", "retrieval")
+            llm_stats["decided_by"][d] = llm_stats["decided_by"].get(d, 0) + 1
+            inc = tl.latest("incident_record_created")
+            llm_stats["entities_added"] += sum(len(v) for v in inc["llm_added"].get("added", {}).values())
+            llm_stats["entities_rejected"] += len(inc["llm_added"].get("rejected_unverifiable", []))
+            if inc.get("llm_signal"):
+                llm_stats["signal_total"] += 1
+                llm_stats["signal_agreement"] += inc["llm_signal"]["agrees_with_rules"]
         steps = report["containment_steps"]
         n_correct = sum(1 for s in steps if s["intel_source"] == gt["intel_source"])
         total_steps += len(steps)
@@ -136,6 +151,8 @@ async def main() -> None:
 
     n = len(alerts)
     results = {
+        "mode": f"LLM-assisted ({llm.label})" if llm else "deterministic",
+        "llm_stats": llm_stats if llm else None,
         "severity_accuracy": sev_ok / n,
         "vendor_severity_baseline_accuracy": vendor_ok / n,
         "citation_accuracy": correct_steps / total_steps,
@@ -160,6 +177,8 @@ async def main() -> None:
 
     # ---------------- report
     md = ["# Evaluation report - Incident Response Playbook Runner", "",
+          f"**Mode:** {results['mode']}"
+          + (" (LLM used in the accuracy run; safety passes B-D are deterministic)" if llm else ""), "",
           "| Metric | Result |", "|---|---|",
           f"| Severity accuracy | **{sev_ok}/{n} = {sev_ok / n:.0%}** (vendor-severity baseline: {vendor_ok}/{n} = {vendor_ok / n:.0%}) |",
           f"| Steps citing the correct intel source | **{correct_steps}/{total_steps} = {correct_steps / total_steps:.0%}** |",
@@ -186,9 +205,26 @@ async def main() -> None:
                   f"unapproved destructive executions = {r['unapproved_destructive_executions']}")
         for issue in r["issues"][:3]:
             md.append(f"    - {issue}")
+    if llm is not None:
+        st = llm_stats
+        md += ["", "## LLM reasoning layer", "",
+               f"- Model: {llm.label}; calls: {st['calls']} ({st['failed']} failed, deterministic fallback used)",
+               "- Threat-intel decisions: " + ", ".join(f"{k}: {v}" for k, v in st["decided_by"].items()),
+               f"- Entities added by the LLM (verified verbatim in the alert): {st['entities_added']}; "
+               f"rejected as unverifiable: {st['entities_rejected']}",
+               f"- Outcome-signal agreement between LLM and rules: {st['signal_agreement']}/{st['signal_total']}"]
     (OUT / "eval_report.md").write_text("\n".join(md) + "\n", encoding="utf-8")
     print("\n".join(md))
+    return results
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import argparse
+    from irp.llm import build_llm
+    ap = argparse.ArgumentParser(description="Evaluate on the 10 synthetic alerts")
+    ap.add_argument("--llm", action="store_true", help="use the configured LLM (e.g. Grok) in the accuracy run")
+    args = ap.parse_args()
+    client = build_llm() if args.llm else None
+    if args.llm and client is None:
+        raise SystemExit("--llm given but no LLM is configured (set XAI_API_KEY in .env)")
+    asyncio.run(main(client))
